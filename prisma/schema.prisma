@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String           @id // UUID or Base64Url ID
+  username   String
+  isOwner    Boolean          @default(false)
+  lastBeatAt DateTime         @default(now())
+  isActive   Boolean          @default(true) // for URL reissue, set old ones to false
+  folders    PlaylistFolder[]
+}
+
+model PlaylistFolder {
+  id      String         @id @default(uuid())
+  userId  String
+  name    String
+  user    User           @relation(fields: [userId], references: [id])
+  items   PlaylistItem[]
+}
+
+model PlaylistItem {
+  id           String         @id @default(uuid())
+  folderId     String
+  url          String
+  title        String
+  providerName String
+  platform     String         // youtube, niconico, etc.
+  thumbnailUrl String?
+  folder       PlaylistFolder @relation(fields: [folderId], references: [id])
+}
+
+model EventState {
+  id              Int      @id @default(1)
+  currentVideoId  String?
+  lastUpdatedAt   DateTime @default(now())
+}
