@@ -69,6 +69,8 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
   // Drag and Drop state
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
+  const [dragPosition, setDragPosition] = useState<'top' | 'bottom' | null>(null);
 
   // UI state
   const [toastMessage, setToastMessage] = useState<{message: string, type: 'error' | 'success'} | null>(null);
@@ -288,6 +290,10 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
   // Item Drag & Drop
   const handleItemDrop = async (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
+    const pos = dragPosition;
+    setDragOverItemId(null);
+    setDragPosition(null);
+
     if (!draggedItemId || draggedItemId === targetId || !selectedFolder) return;
     
     // Automatically switch to Custom Sort if sorted manually
@@ -296,7 +302,16 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
 
     const newItems = [...selectedFolder.items];
     const fromIdx = newItems.findIndex(i => i.id === draggedItemId);
-    const toIdx = newItems.findIndex(i => i.id === targetId);
+    let toIdx = newItems.findIndex(i => i.id === targetId);
+
+    if (pos === 'bottom') {
+      toIdx += 1;
+    }
+    // Adjust if removing fromIdx shifts the toIdx down
+    if (fromIdx < toIdx) {
+      toIdx -= 1;
+    }
+
     const [removed] = newItems.splice(fromIdx, 1);
     newItems.splice(toIdx, 0, removed);
     
@@ -592,90 +607,115 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {displayedItems.map((item) => (
-                  <div 
-                    key={item.id} 
-                    className="list-item"
-                    draggable={sortMode === 'custom'}
-                    onDragStart={(e) => { 
-                      if (sortMode !== 'custom') return;
-                      setDraggedItemId(item.id); 
-                      e.dataTransfer.effectAllowed = 'move'; 
-                    }}
-                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                    onDrop={(e) => handleItemDrop(e, item.id)}
-                    onDragEnd={() => setDraggedItemId(null)}
-                    style={{ 
-                      opacity: draggedItemId === item.id ? 0.5 : 1,
-                      cursor: sortMode === 'custom' ? 'grab' : 'default'
-                    }}
-                  >
-                      <div style={{ display: "flex", alignItems: "center", gap: "16px", overflow: "hidden", flexGrow: 1 }}>
+                  <div key={item.id} style={{ position: 'relative' }}>
+                    {dragOverItemId === item.id && dragPosition === 'top' && (
+                      <div style={{ position: 'absolute', top: -2, left: 0, right: 0, height: 4, background: '#3b82f6', borderRadius: 2, zIndex: 10, pointerEvents: 'none' }} />
+                    )}
+                    
+                    <div 
+                      className="list-item"
+                      draggable={sortMode === 'custom'}
+                      onDragStart={(e) => { 
+                        if (sortMode !== 'custom') return;
+                        setDraggedItemId(item.id); 
+                        e.dataTransfer.effectAllowed = 'move'; 
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (sortMode !== 'custom' || draggedItemId === item.id) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const y = e.clientY - rect.top;
+                        const newPos = y < rect.height / 2 ? 'top' : 'bottom';
+                        if (dragPosition !== newPos) setDragPosition(newPos);
+                        if (dragOverItemId !== item.id) setDragOverItemId(item.id);
+                      }}
+                      onDragLeave={(e) => {
+                        // Only clear if leaving the item entirely
+                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                          setDragOverItemId(null);
+                          setDragPosition(null);
+                        }
+                      }}
+                      onDrop={(e) => handleItemDrop(e, item.id)}
+                      onDragEnd={() => {
+                        setDraggedItemId(null);
+                        setDragOverItemId(null);
+                        setDragPosition(null);
+                      }}
+                      style={{ 
+                        opacity: draggedItemId === item.id ? 0.4 : 1,
+                        cursor: sortMode === 'custom' ? 'grab' : 'default',
+                        transition: 'opacity 0.2s',
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "16px", overflow: "hidden", flexGrow: 1, pointerEvents: draggedItemId ? 'none' : 'auto' }}>
                         {sortMode === 'custom' && (
                           <div style={{ color: "var(--border-light)", fontSize: "1.2rem", cursor: "grab", paddingRight: "8px" }}>⋮⋮</div>
                         )}
-                        <a href={item.url} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: "16px", textDecoration: "none", color: "inherit", overflow: "hidden", flexGrow: 1 }}>
-                          {item.thumbnailUrl ? (
-                            <div style={{ position: "relative", flexShrink: 0 }}>
-                              <img src={item.thumbnailUrl} alt="thumbnail" style={{ width: "96px", height: "54px", objectFit: "cover", borderRadius: "6px", border: '1px solid var(--border-light)' }} />
-                              {item.duration !== null && (
-                                <span style={{ position: "absolute", bottom: "4px", right: "4px", background: "rgba(0,0,0,0.75)", color: "white", fontSize: "10px", padding: "2px 4px", borderRadius: "4px", fontWeight: "bold" }}>
-                                  {Math.floor(item.duration / 60)}:{String(item.duration % 60).padStart(2, '0')}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <div style={{ width: "96px", height: "54px", background: "#f3f4f6", borderRadius: "6px", border: '1px solid var(--border-light)', position: "relative", flexShrink: 0 }}>
-                              {item.duration !== null && (
-                                <span style={{ position: "absolute", bottom: "4px", right: "4px", background: "rgba(0,0,0,0.75)", color: "white", fontSize: "10px", padding: "2px 4px", borderRadius: "4px", fontWeight: "bold" }}>
-                                  {Math.floor(item.duration / 60)}:{String(item.duration % 60).padStart(2, '0')}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          <div style={{ overflow: "hidden", flexGrow: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 4px 0" }}>
-                              {item.platform === 'youtube' ? (
-                                <svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#ff0000", flexShrink: 0, fontSize: "1.1rem" }}>
-                                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                                </svg>
-                              ) : item.platform === 'niconico' ? (
-                                <svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#ffffff", background: "#000000", borderRadius: "2px", flexShrink: 0, fontSize: "1.1rem" }}>
-                                  <path d="M2.38 12C2.38 6.69 6.69 2.38 12 2.38S21.62 6.69 21.62 12 17.31 21.62 12 21.62 2.38 17.31 2.38 12zm8.57-2.3c0-.44-.35-.79-.79-.79h-2.1c-.44 0-.79.35-.79.79v4.6c0 .44.35.79.79.79h2.1c.44 0 .79-.35.79-.79v-4.6zm6.65.68c0-1.78-1.44-3.22-3.22-3.22h-1.6c-.44 0-.79.35-.79.79v4.6c0 .44.35.79.79.79h1.6c1.78 0 3.22-1.44 3.22-3.22zM15 11.23h-.42v1.54H15c.42 0 .76-.34.76-.77 0-.42-.34-.77-.76-.77z"/>
-                                </svg>
-                              ) : (
-                                <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, fontSize: "1.1rem" }}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                              )}
+                        <div style={{ position: "relative", flexShrink: 0 }}>
+                          <a href={item.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }} draggable={false}>
+                            {item.thumbnailUrl ? (
+                              <img src={item.thumbnailUrl} alt="thumbnail" draggable={false} style={{ width: "96px", height: "54px", objectFit: "cover", borderRadius: "6px", border: '1px solid var(--border-light)' }} />
+                            ) : (
+                              <div style={{ width: "96px", height: "54px", background: "#f3f4f6", borderRadius: "6px", border: '1px solid var(--border-light)' }}></div>
+                            )}
+                            {item.duration !== null && (
+                              <span style={{ position: "absolute", bottom: "4px", right: "4px", background: "rgba(0,0,0,0.75)", color: "white", fontSize: "10px", padding: "2px 4px", borderRadius: "4px", fontWeight: "bold" }}>
+                                {Math.floor(item.duration / 60)}:{String(item.duration % 60).padStart(2, '0')}
+                              </span>
+                            )}
+                          </a>
+                        </div>
+                        <div style={{ overflow: "hidden", flexGrow: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", margin: "0 0 4px 0" }}>
+                            {item.platform === 'youtube' ? (
+                              <svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#ff0000", flexShrink: 0, fontSize: "1.1rem" }}>
+                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                              </svg>
+                            ) : item.platform === 'niconico' ? (
+                              <svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" style={{ color: "#ffffff", background: "#000000", borderRadius: "2px", flexShrink: 0, fontSize: "1.1rem" }}>
+                                <path d="M2.38 12C2.38 6.69 6.69 2.38 12 2.38S21.62 6.69 21.62 12 17.31 21.62 12 21.62 2.38 17.31 2.38 12zm8.57-2.3c0-.44-.35-.79-.79-.79h-2.1c-.44 0-.79.35-.79.79v4.6c0 .44.35.79.79.79h2.1c.44 0 .79-.35.79-.79v-4.6zm6.65.68c0-1.78-1.44-3.22-3.22-3.22h-1.6c-.44 0-.79.35-.79.79v4.6c0 .44.35.79.79.79h1.6c1.78 0 3.22-1.44 3.22-3.22zM15 11.23h-.42v1.54H15c.42 0 .76-.34.76-.77 0-.42-.34-.77-.76-.77z"/>
+                              </svg>
+                            ) : (
+                              <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, fontSize: "1.1rem" }}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                            )}
+                            <a href={item.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} draggable={false}>
                               <p style={{ fontSize: "1rem", fontWeight: "500", margin: 0, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</p>
-                            </div>
-                            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                              <span style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>{item.providerName}</span>
-                              {item.viewCount !== null && (
-                                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                  {new Intl.NumberFormat('ja-JP', { notation: "compact", compactDisplay: "short" }).format(item.viewCount)}
-                                </span>
-                              )}
-                              {item.likeCount !== null && (
-                                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
-                                  {new Intl.NumberFormat('ja-JP', { notation: "compact", compactDisplay: "short" }).format(item.likeCount)}
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "4px" }}>
-                              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                                リリース: {formatDate(item.releaseDate)}
-                              </span>
-                              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                                追加日: {formatDate(item.createdAt)}
-                              </span>
-                            </div>
+                            </a>
                           </div>
-                        </a>
+                          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                            <span style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>{item.providerName}</span>
+                            {item.viewCount !== null && (
+                              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                {new Intl.NumberFormat('ja-JP', { notation: "compact", compactDisplay: "short" }).format(item.viewCount)}
+                              </span>
+                            )}
+                            {item.likeCount !== null && (
+                              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+                                {new Intl.NumberFormat('ja-JP', { notation: "compact", compactDisplay: "short" }).format(item.likeCount)}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "4px" }}>
+                            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                              リリース: {formatDate(item.releaseDate)}
+                            </span>
+                            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                              追加日: {formatDate(item.createdAt)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     <button className="btn btn-danger-ghost" style={{ marginLeft: "16px", flexShrink: 0 }} onClick={() => handleDeleteItem(item.id)}>
                       削除
                     </button>
+                    </div>
+                    {dragOverItemId === item.id && dragPosition === 'bottom' && (
+                      <div style={{ position: 'absolute', bottom: -2, left: 0, right: 0, height: 4, background: '#3b82f6', borderRadius: 2, zIndex: 10, pointerEvents: 'none' }} />
+                    )}
                   </div>
                 ))}
               </div>
