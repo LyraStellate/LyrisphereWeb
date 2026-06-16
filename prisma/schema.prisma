@@ -45,12 +45,14 @@ model PlaylistItem {
   likeCount    Int?
   commentCount Int?
   createdAt    DateTime       @default(now())
+  lastPlayedAt DateTime?
   order        Int            @default(0)
   folder       PlaylistFolder @relation(fields: [folderId], references: [id])
 }
 
 model EventState {
   id              Int      @id @default(1)
-  currentVideoId  String?
-  lastUpdatedAt   DateTime @default(now())
+  currentVideoId   String?
+  lastChosenUserId String?
+  lastUpdatedAt    DateTime @default(now())
 }

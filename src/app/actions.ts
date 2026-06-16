@@ -57,27 +57,65 @@ export async function deleteFolder(folderId: string) {
   return { success: true };
 }
 
-export async function addPlaylistItem(folderId: string, url: string, addedBy: string) {
-  if (!url.trim()) return { error: "URLを入力してください" };
-
-  let title = "Unknown Title";
+function normalizeMediaInput(input: string) {
+  let normalizedUrl = input.trim();
   let platform = "other";
-  let thumbnailUrl: string | null = null;
-  let providerName = addedBy;
-  let releaseDate: string | null = null;
-  let duration: number | null = null;
-  let description: string | null = null;
-  let tags: string | null = null;
-  let viewCount: number | null = null;
-  let likeCount: number | null = null;
-  let commentCount: number | null = null;
+  let videoId: string | null = null;
+
+  if (/^(sm|nm|so)\d+$/.test(normalizedUrl)) {
+    platform = "niconico";
+    videoId = normalizedUrl;
+    normalizedUrl = `https://www.nicovideo.jp/watch/${videoId}`;
+    return { normalizedUrl, platform, videoId };
+  }
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(normalizedUrl)) {
+    platform = "youtube";
+    videoId = normalizedUrl;
+    normalizedUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    return { normalizedUrl, platform, videoId };
+  }
+
+  if (normalizedUrl.includes("youtube.com") || normalizedUrl.includes("youtu.be")) {
+    const ytMatch = normalizedUrl.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
+    if (ytMatch) {
+      platform = "youtube";
+      videoId = ytMatch[1];
+      normalizedUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      return { normalizedUrl, platform, videoId };
+    }
+  }
+
+  if (normalizedUrl.includes("nicovideo.jp")) {
+    const nicoMatch = normalizedUrl.match(/watch\/([a-zA-Z0-9_]+)/);
+    if (nicoMatch) {
+      platform = "niconico";
+      videoId = nicoMatch[1];
+      normalizedUrl = `https://www.nicovideo.jp/watch/${videoId}`;
+      return { normalizedUrl, platform, videoId };
+    }
+  }
+
+  return { normalizedUrl, platform, videoId };
+}
+
+async function fetchMediaMetadata(platform: string, videoId: string | null, fallbackProviderName: string) {
+  let metadata = {
+    title: "Unknown Title",
+    thumbnailUrl: null as string | null,
+    providerName: fallbackProviderName,
+    releaseDate: null as string | null,
+    duration: null as number | null,
+    description: null as string | null,
+    tags: null as string | null,
+    viewCount: null as number | null,
+    likeCount: null as number | null,
+    commentCount: null as number | null,
+  };
 
   try {
-    if (url.includes("youtube.com") || url.includes("youtu.be")) {
-      platform = "youtube";
-      const ytMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
-      if (ytMatch && process.env.YOUTUBE_API_KEY) {
-        const videoId = ytMatch[1];
+    if (platform === "youtube" && videoId) {
+      if (process.env.YOUTUBE_API_KEY) {
         const ytRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`);
         if (ytRes.ok) {
           const ytData = await ytRes.json();
@@ -85,61 +123,62 @@ export async function addPlaylistItem(folderId: string, url: string, addedBy: st
             const snippet = ytData.items[0].snippet;
             const contentDetails = ytData.items[0].contentDetails;
             const statistics = ytData.items[0].statistics;
-            title = snippet.title;
-            thumbnailUrl = snippet.thumbnails?.high?.url || snippet.thumbnails?.default?.url || null;
-            providerName = snippet.channelTitle || providerName;
-            releaseDate = snippet.publishedAt || null;
-            duration = contentDetails?.duration ? parseYTDuration(contentDetails.duration) : null;
-            description = snippet.description || null;
-            tags = snippet.tags ? snippet.tags.join(',') : null;
-            viewCount = statistics?.viewCount ? parseInt(statistics.viewCount, 10) : null;
-            likeCount = statistics?.likeCount ? parseInt(statistics.likeCount, 10) : null;
-            commentCount = statistics?.commentCount ? parseInt(statistics.commentCount, 10) : null;
+            metadata.title = snippet.title;
+            metadata.thumbnailUrl = snippet.thumbnails?.high?.url || snippet.thumbnails?.default?.url || null;
+            metadata.providerName = snippet.channelTitle || fallbackProviderName;
+            metadata.releaseDate = snippet.publishedAt || null;
+            metadata.duration = contentDetails?.duration ? parseYTDuration(contentDetails.duration) : null;
+            metadata.description = snippet.description || null;
+            metadata.tags = snippet.tags ? snippet.tags.join(',') : null;
+            metadata.viewCount = statistics?.viewCount ? parseInt(statistics.viewCount, 10) : null;
+            metadata.likeCount = statistics?.likeCount ? parseInt(statistics.likeCount, 10) : null;
+            metadata.commentCount = statistics?.commentCount ? parseInt(statistics.commentCount, 10) : null;
           } else {
-            title = "YouTube Video (Not Found)";
+            metadata.title = "YouTube Video (Not Found)";
           }
         } else {
-          title = "YouTube Video (API Error)";
+          metadata.title = "YouTube Video (API Error)";
         }
       } else {
-        title = "YouTube Video (No API Key)";
+        metadata.title = "YouTube Video (No API Key)";
       }
-    } else if (url.includes("nicovideo.jp")) {
-      platform = "niconico";
-      const videoIdMatch = url.match(/watch\/([a-zA-Z0-9_]+)/);
-      if (videoIdMatch) {
-        const videoId = videoIdMatch[1];
-        const nicoRes = await fetch(`https://www.nicovideo.jp/api/watch/v3_guest/${videoId}?actionTrackId=0_0`, {
-          headers: {
-            'x-frontend-id': '6',
-            'x-frontend-version': '0'
-          }
-        });
-        if (nicoRes.ok) {
-          const data = await nicoRes.json();
-          if (data && data.data && data.data.video) {
-            title = data.data.video.title;
-            const t = data.data.video.thumbnail;
-            thumbnailUrl = t?.nvLargeUrl || t?.largeUrl || t?.url || null;
-            providerName = data.data.owner?.nickname || data.data.channel?.name || providerName;
-            releaseDate = data.data.video.registeredAt || null;
-            duration = data.data.video.duration || null;
-            description = data.data.video.description || null;
-            tags = data.data.tag?.items ? data.data.tag.items.map((item: any) => item.name).join(',') : null;
-            viewCount = data.data.video.count?.view || null;
-            likeCount = data.data.video.count?.like || null;
-            commentCount = data.data.video.count?.comment || null;
-          }
-        } else {
-          title = "Niconico Video";
+    } else if (platform === "niconico" && videoId) {
+      const nicoRes = await fetch(`https://www.nicovideo.jp/api/watch/v3_guest/${videoId}?actionTrackId=0_0`, {
+        headers: {
+          'x-frontend-id': '6',
+          'x-frontend-version': '0'
+        }
+      });
+      if (nicoRes.ok) {
+        const data = await nicoRes.json();
+        if (data && data.data && data.data.video) {
+          metadata.title = data.data.video.title;
+          const t = data.data.video.thumbnail;
+          metadata.thumbnailUrl = t?.nvLargeUrl || t?.largeUrl || t?.url || null;
+          metadata.providerName = data.data.owner?.nickname || data.data.channel?.name || fallbackProviderName;
+          metadata.releaseDate = data.data.video.registeredAt || null;
+          metadata.duration = data.data.video.duration || null;
+          metadata.description = data.data.video.description || null;
+          metadata.tags = data.data.tag?.items ? data.data.tag.items.map((item: any) => item.name).join(',') : null;
+          metadata.viewCount = data.data.video.count?.view || null;
+          metadata.likeCount = data.data.video.count?.like || null;
+          metadata.commentCount = data.data.video.count?.comment || null;
         }
       } else {
-        title = "Niconico Video";
+        metadata.title = "Niconico Video";
       }
     }
   } catch (e) {
     console.error("Failed to fetch metadata", e);
   }
+  return metadata;
+}
+
+export async function addPlaylistItem(folderId: string, url: string, addedBy: string) {
+  if (!url.trim()) return { error: "URLを入力してください" };
+
+  const { normalizedUrl, platform, videoId } = normalizeMediaInput(url);
+  const metadata = await fetchMediaMetadata(platform, videoId, addedBy);
 
   const maxItem = await prisma.playlistItem.findFirst({
     where: { folderId },
@@ -150,19 +189,48 @@ export async function addPlaylistItem(folderId: string, url: string, addedBy: st
   await prisma.playlistItem.create({
     data: {
       folderId,
-      url: url.trim(),
-      title,
+      url: normalizedUrl,
       platform,
-      providerName,
-      thumbnailUrl,
-      releaseDate,
-      duration,
-      description,
-      tags,
-      viewCount,
-      likeCount,
-      commentCount,
+      title: metadata.title,
+      providerName: metadata.providerName,
+      thumbnailUrl: metadata.thumbnailUrl,
+      releaseDate: metadata.releaseDate,
+      duration: metadata.duration,
+      description: metadata.description,
+      tags: metadata.tags,
+      viewCount: metadata.viewCount,
+      likeCount: metadata.likeCount,
+      commentCount: metadata.commentCount,
       order: newOrder,
+    },
+  });
+
+  revalidatePath("/");
+  return { success: true };
+}
+
+export async function refreshPlaylistItem(itemId: string) {
+  const item = await prisma.playlistItem.findUnique({ where: { id: itemId } });
+  if (!item) return { error: "Item not found" };
+
+  const { normalizedUrl, platform, videoId } = normalizeMediaInput(item.url);
+  const metadata = await fetchMediaMetadata(platform, videoId, item.providerName);
+
+  await prisma.playlistItem.update({
+    where: { id: itemId },
+    data: {
+      url: normalizedUrl,
+      platform,
+      title: metadata.title,
+      providerName: metadata.providerName,
+      thumbnailUrl: metadata.thumbnailUrl,
+      releaseDate: metadata.releaseDate,
+      duration: metadata.duration,
+      description: metadata.description,
+      tags: metadata.tags,
+      viewCount: metadata.viewCount,
+      likeCount: metadata.likeCount,
+      commentCount: metadata.commentCount,
     },
   });
 
@@ -172,6 +240,25 @@ export async function addPlaylistItem(folderId: string, url: string, addedBy: st
 
 export async function deletePlaylistItem(itemId: string) {
   await prisma.playlistItem.delete({ where: { id: itemId } });
+  revalidatePath("/");
+  return { success: true };
+}
+
+export async function movePlaylistItem(itemId: string, newFolderId: string) {
+  const maxItem = await prisma.playlistItem.findFirst({
+    where: { folderId: newFolderId },
+    orderBy: { order: 'desc' },
+  });
+  const newOrder = maxItem ? maxItem.order + 1 : 0;
+
+  await prisma.playlistItem.update({
+    where: { id: itemId },
+    data: {
+      folderId: newFolderId,
+      order: newOrder,
+    },
+  });
+
   revalidatePath("/");
   return { success: true };
 }

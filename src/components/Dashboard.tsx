@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition, useEffect, useMemo } from "react";
+import { useState, useTransition, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { createFolder, deleteFolder, addPlaylistItem, deletePlaylistItem, checkUserStatus, renameFolder, reorderFolders, reorderItems, toggleFolderActive } from "@/app/actions";
+import { createFolder, deleteFolder, addPlaylistItem, deletePlaylistItem, checkUserStatus, renameFolder, reorderFolders, reorderItems, toggleFolderActive, movePlaylistItem, refreshPlaylistItem } from "@/app/actions";
 
 type PlaylistItem = {
   id: string;
@@ -40,21 +40,148 @@ type User = {
 type SortMode = 'title' | 'provider' | 'releaseDate' | 'viewCount' | 'likeCount' | 'createdAt' | 'custom';
 type SortOrder = 'asc' | 'desc';
 
+const LongPressDeleteButton = ({ onDelete }: { onDelete: () => void }) => {
+  const [isPressing, setIsPressing] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startPress = (e: React.MouseEvent | React.TouchEvent) => {
+    if ('button' in e && e.button !== 0) return;
+    setIsPressing(true);
+    timeoutRef.current = setTimeout(() => {
+      onDelete();
+      setIsPressing(false);
+    }, 500);
+  };
+
+  const cancelPress = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    setIsPressing(false);
+  };
+
+  return (
+    <button
+      className="btn btn-danger-ghost"
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        userSelect: 'none',
+      }}
+      onMouseDown={startPress}
+      onMouseUp={cancelPress}
+      onMouseLeave={cancelPress}
+      onTouchStart={startPress}
+      onTouchEnd={cancelPress}
+      onTouchCancel={cancelPress}
+      onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      draggable={true}
+    >
+      <div 
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: isPressing ? '100%' : '0%',
+          background: 'rgba(239, 68, 68, 0.2)',
+          transition: isPressing ? 'width 0.5s linear' : 'width 0.2s ease-out',
+          zIndex: 0,
+        }}
+      />
+      <span style={{ position: 'relative', zIndex: 1, pointerEvents: 'none' }}>削除</span>
+    </button>
+  );
+};
+
+const WelcomeSplash = ({ username, isNewUser, onComplete }: { username: string, isNewUser: boolean, onComplete: () => void }) => {
+  const [stage, setStage] = useState<'enter' | 'show' | 'exit'>('enter');
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setStage('show'), 100);
+    const t2 = setTimeout(() => setStage('exit'), 2000);
+    const t3 = setTimeout(() => onComplete(), 2500);
+
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [onComplete]);
+
+  const message = isNewUser ? `ようこそ、${username}さん` : `おかえりなさい、${username}さん`;
+  const subMessage = isNewUser ? 'Lyrisphereへ' : '今日も素敵な音楽を';
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(255, 255, 255, 0.95)',
+      backdropFilter: 'blur(10px)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999,
+      opacity: stage === 'exit' ? 0 : 1,
+      transition: 'opacity 0.5s ease-out',
+      color: '#111827',
+      fontFamily: 'sans-serif',
+      pointerEvents: stage === 'exit' ? 'none' : 'auto'
+    }}>
+      <div style={{
+        transform: stage === 'show' ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.98)',
+        opacity: stage === 'show' ? 1 : 0,
+        filter: stage === 'show' ? 'blur(0px)' : 'blur(8px)',
+        transition: 'all 1.2s cubic-bezier(0.2, 0.8, 0.2, 1)',
+        textAlign: 'center'
+      }}>
+        <h1 style={{ 
+          fontSize: '2.5rem', 
+          fontWeight: 400, 
+          margin: '0 0 16px 0',
+          color: '#111827',
+          letterSpacing: stage === 'show' ? '0.05em' : '-0.05em',
+          transition: 'letter-spacing 1.5s cubic-bezier(0.2, 0.8, 0.2, 1)'
+        }}>
+          {message}
+        </h1>
+        <p style={{
+          fontSize: '1.1rem',
+          color: '#64748b',
+          margin: 0,
+          opacity: stage === 'show' ? 1 : 0,
+          transform: stage === 'show' ? 'translateY(0)' : 'translateY(10px)',
+          letterSpacing: stage === 'show' ? '0.2em' : '0em',
+          transition: 'all 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) 0.4s'
+        }}>
+          {subMessage}
+        </p>
+      </div>
+    </div>
+  );
+};
+
 export default function Dashboard({ initialUser }: { initialUser: User }) {
   const router = useRouter();
   const [user, setUser] = useState(initialUser);
+  const [showSplash, setShowSplash] = useState(true);
+  const isNewUser = useMemo(() => initialUser.folders.every(f => f.items.length === 0), [initialUser]);
+  const getTopFolderId = (folders: PlaylistFolder[]) => {
+    const nonSystem = folders.filter(f => !f.isSystem);
+    if (nonSystem.length > 0) return nonSystem[0].id;
+    return folders.length > 0 ? folders[0].id : null;
+  };
+
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(
-    initialUser.folders.length > 0 ? initialUser.folders[0].id : null
+    () => getTopFolderId(initialUser.folders)
   );
   
   useEffect(() => {
     setUser(initialUser);
     if (!selectedFolderId && initialUser.folders.length > 0) {
-      setSelectedFolderId(initialUser.folders[0].id);
+      setSelectedFolderId(getTopFolderId(initialUser.folders));
     } else if (selectedFolderId && !initialUser.folders.find(f => f.id === selectedFolderId)) {
-      setSelectedFolderId(initialUser.folders.length > 0 ? initialUser.folders[0].id : null);
+      setSelectedFolderId(getTopFolderId(initialUser.folders));
     }
-  }, [initialUser]);
+  }, [initialUser, selectedFolderId]);
 
   const [newFolderName, setNewFolderName] = useState("");
   const [newUrl, setNewUrl] = useState("");
@@ -71,33 +198,36 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [dragOverItemId, setDragOverItemId] = useState<string | null>(null);
   const [dragPosition, setDragPosition] = useState<'top' | 'bottom' | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
   // UI state
   const [toastMessage, setToastMessage] = useState<{message: string, type: 'error' | 'success'} | null>(null);
   const [confirmModal, setConfirmModal] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
+  const [moveModal, setMoveModal] = useState<{itemId: string, itemName: string, currentFolderId: string} | null>(null);
+  const [selectedMoveFolderId, setSelectedMoveFolderId] = useState<string>("");
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
     setToastMessage({ message, type });
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  const [refreshingItemId, setRefreshingItemId] = useState<string | null>(null);
+
+  const handleRefreshItem = async (itemId: string) => {
+    setRefreshingItemId(itemId);
+    const res = await refreshPlaylistItem(itemId);
+    if (res?.error) {
+      showToast(res.error, "error");
+    } else {
+      showToast("楽曲情報を更新しました", "success");
+      refreshData();
+    }
+    setRefreshingItemId(null);
+  };
+
   // Sorting state
-  const [sortMode, setSortMode] = useState<SortMode>('title');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-
-  // Load saved sorting preferences
-  useEffect(() => {
-    const savedMode = localStorage.getItem('lyrisphere_sortMode') as SortMode;
-    const savedOrder = localStorage.getItem('lyrisphere_sortOrder') as SortOrder;
-    if (savedMode) setSortMode(savedMode);
-    if (savedOrder) setSortOrder(savedOrder);
-  }, []);
-
-  // Save sorting preferences
-  useEffect(() => {
-    localStorage.setItem('lyrisphere_sortMode', sortMode);
-    localStorage.setItem('lyrisphere_sortOrder', sortOrder);
-  }, [sortMode, sortOrder]);
+  const [sortMode, setSortMode] = useState<SortMode>('createdAt');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -195,8 +325,14 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
 
   const executeAddUrl = async (folderId: string, url: string) => {
     setNewUrl("");
-    await addPlaylistItem(folderId, url, user.username);
-    refreshData();
+    try {
+      await addPlaylistItem(folderId, url, user.username);
+      showToast("楽曲を追加しました", "success");
+      refreshData();
+    } catch (e) {
+      showToast("エラー: 楽曲の追加に失敗しました。");
+      console.error(e);
+    }
   };
 
   const handleAddUrl = async () => {
@@ -236,6 +372,29 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
   const handleDeleteItem = async (itemId: string) => {
     await deletePlaylistItem(itemId);
     refreshData();
+  };
+
+  const executeMoveItem = async (itemId: string, targetFolderId: string) => {
+    const itemToMove = selectedFolder?.items.find(i => i.id === itemId);
+    const targetFolder = user.folders.find(f => f.id === targetFolderId);
+    
+    if (!itemToMove || !targetFolder) return;
+
+    const normalizedUrl = normalizeUrl(itemToMove.url);
+    if (targetFolder.items.some(i => normalizeUrl(i.url) === normalizedUrl)) {
+      showToast(`エラー: 移動先のフォルダ「${targetFolder.name}」には既に同じ楽曲が存在します。`);
+      return;
+    }
+
+    await movePlaylistItem(itemId, targetFolderId);
+    refreshData();
+  };
+
+  const handleMoveItem = async () => {
+    if (!moveModal || !selectedMoveFolderId) return;
+    await executeMoveItem(moveModal.itemId, selectedMoveFolderId);
+    setMoveModal(null);
+    setSelectedMoveFolderId("");
   };
 
   // Folder Drag & Drop
@@ -324,10 +483,12 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
   };
 
   return (
-    <div className="layout-container" style={{ display: 'flex', gap: '40px', opacity: isPending ? 0.6 : 1, transition: 'opacity 0.2s', minHeight: '80vh' }}>
+    <>
+      {showSplash && <WelcomeSplash username={user.username} isNewUser={isNewUser} onComplete={() => setShowSplash(false)} />}
+      <div className="layout-container" style={{ display: 'flex', gap: '40px', opacity: showSplash ? 0 : (isPending ? 0.6 : 1), transition: 'opacity 0.5s', minHeight: '80vh' }}>
       
       {/* Sidebar */}
-      <aside style={{ width: '240px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '32px' }}>
+      <aside style={{ width: '240px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '32px', position: 'sticky', top: '40px', alignSelf: 'flex-start', maxHeight: 'calc(100vh - 80px)', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <h1 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-main)', letterSpacing: '-0.02em', margin: 0 }}>Lyrisphere</h1>
@@ -353,10 +514,33 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
                   onClick={() => setSelectedFolderId(folder.id)}
                   draggable
                   onDragStart={(e) => { setDraggedFolderId(folder.id); e.dataTransfer.effectAllowed = 'move'; }}
-                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                  onDrop={(e) => handleFolderDrop(e, folder.id)}
-                  onDragEnd={() => setDraggedFolderId(null)}
-                  style={{ opacity: draggedFolderId === folder.id ? 0.5 : 1, display: 'flex', alignItems: 'center' }}
+                  onDragOver={(e) => { 
+                    e.preventDefault(); 
+                    e.dataTransfer.dropEffect = 'move'; 
+                    if (draggedItemId && dragOverFolderId !== folder.id && selectedFolderId !== folder.id) {
+                      setDragOverFolderId(folder.id);
+                    }
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverFolderId === folder.id) setDragOverFolderId(null);
+                  }}
+                  onDrop={async (e) => {
+                    setDragOverFolderId(null);
+                    if (draggedFolderId) {
+                      handleFolderDrop(e, folder.id);
+                    } else if (draggedItemId && selectedFolderId !== folder.id) {
+                      e.preventDefault();
+                      await executeMoveItem(draggedItemId, folder.id);
+                      setDraggedItemId(null);
+                    }
+                  }}
+                  onDragEnd={() => { setDraggedFolderId(null); setDragOverFolderId(null); }}
+                  style={{ 
+                    opacity: draggedFolderId === folder.id ? 0.5 : 1, 
+                    display: 'flex', 
+                    alignItems: 'center',
+                    background: dragOverFolderId === folder.id ? '#e0f2fe' : undefined
+                  }}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexGrow: 1 }}>{folder.name}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -385,7 +569,30 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
                   key={folder.id} 
                   className={`sidebar-link system-folder ${selectedFolderId === folder.id ? 'active' : ''}`}
                   onClick={() => setSelectedFolderId(folder.id)}
-                  style={{ display: 'flex', alignItems: 'center', marginTop: 'auto' }}
+                  onDragOver={(e) => { 
+                    e.preventDefault(); 
+                    e.dataTransfer.dropEffect = 'move'; 
+                    if (draggedItemId && dragOverFolderId !== folder.id && selectedFolderId !== folder.id) {
+                      setDragOverFolderId(folder.id);
+                    }
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverFolderId === folder.id) setDragOverFolderId(null);
+                  }}
+                  onDrop={async (e) => {
+                    setDragOverFolderId(null);
+                    if (draggedItemId && selectedFolderId !== folder.id) {
+                      e.preventDefault();
+                      await executeMoveItem(draggedItemId, folder.id);
+                      setDraggedItemId(null);
+                    }
+                  }}
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    marginTop: 'auto',
+                    background: dragOverFolderId === folder.id ? '#fce7f3' : undefined
+                  }}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexGrow: 1, fontWeight: 'bold' }}>{folder.name}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -614,9 +821,8 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
                     
                     <div 
                       className="list-item"
-                      draggable={sortMode === 'custom'}
+                      draggable={true}
                       onDragStart={(e) => { 
-                        if (sortMode !== 'custom') return;
                         setDraggedItemId(item.id); 
                         e.dataTransfer.effectAllowed = 'move'; 
                       }}
@@ -680,9 +886,30 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
                             ) : (
                               <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, fontSize: "1.1rem" }}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
                             )}
-                            <a href={item.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} draggable={false}>
+                            <a href={item.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 1, minWidth: 0 }} draggable={false}>
                               <p style={{ fontSize: "1rem", fontWeight: "500", margin: 0, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</p>
                             </a>
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(item.url);
+                                showToast("URLをコピーしました", "success");
+                              }}
+                              style={{
+                                background: "transparent", border: "none", cursor: "pointer",
+                                color: "var(--text-muted)", display: "flex", alignItems: "center",
+                                padding: "4px", flexShrink: 0, fontSize: "1rem", transition: "color 0.2s"
+                              }}
+                              title="URLをコピー"
+                              onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-main)'}
+                              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                            >
+                              <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                              </svg>
+                            </button>
                           </div>
                           <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
                             <span style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>{item.providerName}</span>
@@ -709,9 +936,25 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
                           </div>
                         </div>
                       </div>
-                    <button className="btn btn-danger-ghost" style={{ marginLeft: "16px", flexShrink: 0 }} onClick={() => handleDeleteItem(item.id)}>
-                      削除
-                    </button>
+                      <div style={{ display: "flex", gap: "8px", marginLeft: "16px", flexShrink: 0 }}>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleRefreshItem(item.id)}
+                          disabled={refreshingItemId === item.id}
+                          style={{ padding: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          title="楽曲情報を更新・正規化"
+                        >
+                          <svg
+                            width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                            style={{ animation: refreshingItemId === item.id ? 'spin 1s linear infinite' : 'none' }}
+                          >
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                          </svg>
+                        </button>
+                        <LongPressDeleteButton onDelete={() => handleDeleteItem(item.id)} />
+                      </div>
                     </div>
                     {dragOverItemId === item.id && dragPosition === 'bottom' && (
                       <div style={{ position: 'absolute', bottom: -2, left: 0, right: 0, height: 4, background: '#3b82f6', borderRadius: 2, zIndex: 10, pointerEvents: 'none' }} />
@@ -747,6 +990,33 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
         </div>
       )}
 
-    </div>
+      {/* Move Item Modal */}
+      {moveModal && (
+        <div className="modal-overlay" onClick={() => { setMoveModal(null); setSelectedMoveFolderId(""); }}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '1.25rem' }}>楽曲の移動</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+              「{moveModal.itemName}」を移動するフォルダを選択してください。
+            </p>
+            <select
+              className="input-text"
+              value={selectedMoveFolderId}
+              onChange={(e) => setSelectedMoveFolderId(e.target.value)}
+              style={{ marginBottom: '24px' }}
+            >
+              {user.folders.filter(f => f.id !== moveModal.currentFolderId).map(f => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button className="btn btn-secondary" onClick={() => { setMoveModal(null); setSelectedMoveFolderId(""); }}>キャンセル</button>
+              <button className="btn btn-primary" onClick={handleMoveItem} disabled={!selectedMoveFolderId}>移動する</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      </div>
+    </>
   );
 }
