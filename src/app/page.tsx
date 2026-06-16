@@ -22,8 +22,11 @@ export default async function Home() {
     where: { id: sessionId },
     include: {
       folders: {
+        orderBy: { order: 'asc' },
         include: {
-          items: true,
+          items: {
+            orderBy: { order: 'asc' },
+          },
         },
       },
     },
@@ -42,14 +45,7 @@ export default async function Home() {
   }
 
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: "100px" }}>
-      <header style={{ marginBottom: "40px", textAlign: "center" }}>
-        <h1 style={{ fontSize: "2.5rem", color: "var(--primary)" }}>Lyrisphere</h1>
-        <p style={{ color: "var(--text-muted)", marginTop: "10px", fontSize: "1.1rem" }}>
-          {user.username} さん、おかえりなさい
-        </p>
-      </header>
-
+    <div className="animate-fade-in" style={{ paddingBottom: "100px", paddingTop: "40px" }}>
       <Dashboard initialUser={user} />
     </div>
   );

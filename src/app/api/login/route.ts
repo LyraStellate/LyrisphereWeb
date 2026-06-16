@@ -19,42 +19,45 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
   }
 
-  if (isUuid(decodedStr)) {
-    // Reissued UUID
-    user = await prisma.user.findUnique({ where: { id: decodedStr } });
-    if (!user) {
-      return NextResponse.json({ error: "User not found for this UUID" }, { status: 404 });
-    }
-  } else {
-    // Decoded string is the username
-    const username = decodedStr;
-    // Find active user by username where ID is NOT a UUID (meaning they haven't reissued)
-    // Actually, if they reissued, their isActive is true for their UUID, and false for this username-based one.
-    // Wait, let's look up if there's any active user with this username.
-    // The Udon ID format is always the same for a username.
-    const expectedId = idParam; // The Base64 string itself
-    user = await prisma.user.findFirst({
-      where: {
+  // Decoded string is the username
+  const username = decodedStr;
+  const expectedId = idParam; // The Base64 string itself
+  user = await prisma.user.findFirst({
+    where: {
+      username: username,
+    },
+  });
+
+  if (!user) {
+    // First time login
+    user = await prisma.user.create({
+      data: {
+        id: expectedId,
         username: username,
+        isActive: true,
+        folders: {
+          create: {
+            name: "すき！",
+            isSystem: true,
+            order: 9999, // Ensure it's at the end
+          }
+        }
       },
     });
-
-    if (!user) {
-      // First time login
-      user = await prisma.user.create({
+  } else {
+    // Check if existing user has the system folder, if not, create it
+    const systemFolder = await prisma.playlistFolder.findFirst({
+      where: { userId: user.id, isSystem: true }
+    });
+    if (!systemFolder) {
+      await prisma.playlistFolder.create({
         data: {
-          id: expectedId,
-          username: username,
-          isActive: true,
-        },
+          userId: user.id,
+          name: "すき！",
+          isSystem: true,
+          order: 9999,
+        }
       });
-    } else {
-      // Check if user has reissued (if their current active ID is a UUID, they cannot use the XOR ID)
-      if (user.isActive && isUuid(user.id)) {
-         return NextResponse.json({ error: "This URL has been revoked. Please use your reissued URL." }, { status: 403 });
-      }
-      // If user's ID in DB doesn't match and they haven't reissued, maybe update? 
-      // It should match if they haven't reissued.
     }
   }
 
@@ -71,7 +74,11 @@ export async function GET(request: NextRequest) {
     return new NextResponse(null, { status: 200 });
   } else {
     // Browser Login -> Set cookie and redirect to My Page
-    const response = NextResponse.redirect(new URL("/", request.url));
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "localhost:3000";
+    const protocol = request.headers.get("x-forwarded-proto") || "http";
+    const baseUrl = `${protocol}://${host}`;
+    const response = NextResponse.redirect(new URL("/", baseUrl));
+    
     response.cookies.set("sessionId", user.id, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

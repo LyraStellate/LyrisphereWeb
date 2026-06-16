@@ -39,13 +39,15 @@ export async function GET(request: NextRequest) {
   let allItems: any[] = [];
   activeUsers.forEach(user => {
     user.folders.forEach(folder => {
-      folder.items.forEach(item => {
-        allItems.push({
-          ...item,
-          providerName: user.username,
-          folderName: folder.name,
+      if (folder.isActive) {
+        folder.items.forEach(item => {
+          allItems.push({
+            ...item,
+            providerName: user.username,
+            folderName: folder.name,
+          });
         });
-      });
+      }
     });
   });
 
@@ -70,5 +72,13 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  return NextResponse.redirect(selectedItem.url, 302);
+  let finalUrl = selectedItem.url;
+  if (selectedItem.platform === 'niconico') {
+    const match = selectedItem.url.match(/watch\/([a-zA-Z0-9_]+)/);
+    if (match) {
+      finalUrl = `https://www.nicovideo.life/watch?v=${match[1]}`;
+    }
+  }
+
+  return NextResponse.redirect(finalUrl, 302);
 }

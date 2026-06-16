@@ -1,9 +1,10 @@
-FROM node:18-alpine AS base
+FROM node:22-slim AS base
+RUN apt-get update -y && apt-get install -y openssl
 
 FROM base AS deps
-RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
+COPY prisma ./prisma
 RUN npm ci
 
 FROM base AS builder
@@ -27,6 +28,9 @@ COPY --from=builder /app/public ./public
 RUN mkdir .next
 RUN chown nextjs:nodejs .next
 
+# Prisma CLIをランタイム用にインストール
+RUN npm install -g prisma@^5
+
 # Standalone output を使用
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
@@ -34,7 +38,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 
 # マイグレーション実行用スクリプトの作成
 RUN echo '#!/bin/sh' > /app/entrypoint.sh && \
-    echo 'npx prisma db push --accept-data-loss' >> /app/entrypoint.sh && \
+    echo 'set -e' >> /app/entrypoint.sh && \
+    echo 'prisma db push --accept-data-loss --skip-generate' >> /app/entrypoint.sh && \
     echo 'node server.js' >> /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
 

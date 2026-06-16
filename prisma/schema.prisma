@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -17,11 +18,15 @@ model User {
 }
 
 model PlaylistFolder {
-  id      String         @id @default(uuid())
-  userId  String
-  name    String
-  user    User           @relation(fields: [userId], references: [id])
-  items   PlaylistItem[]
+  id        String         @id @default(uuid())
+  userId    String
+  name      String
+  order     Int            @default(0)
+  isActive  Boolean        @default(true)
+  isSystem  Boolean        @default(false)
+  user      User           @relation(fields: [userId], references: [id])
+  items     PlaylistItem[]
+  createdAt DateTime       @default(now())
 }
 
 model PlaylistItem {
@@ -32,6 +37,15 @@ model PlaylistItem {
   providerName String
   platform     String         // youtube, niconico, etc.
   thumbnailUrl String?
+  releaseDate  String?
+  duration     Int?
+  description  String?
+  tags         String?
+  viewCount    Int?
+  likeCount    Int?
+  commentCount Int?
+  createdAt    DateTime       @default(now())
+  order        Int            @default(0)
   folder       PlaylistFolder @relation(fields: [folderId], references: [id])
 }
 
