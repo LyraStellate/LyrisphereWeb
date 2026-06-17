@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
+export const dynamic = 'force-dynamic';
+
 const FALLBACK_BGM_URL = "https://www.youtube.com/watch?v=jfKfPfyJRdk"; // Lofi Girl as fallback
 
 export async function GET(request: NextRequest) {

@@ -211,9 +211,17 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  const lastRefreshTimeRef = useRef<number>(0);
   const [refreshingItemId, setRefreshingItemId] = useState<string | null>(null);
 
   const handleRefreshItem = async (itemId: string) => {
+    const now = Date.now();
+    if (now - lastRefreshTimeRef.current < 1000) {
+      showToast("更新は1秒以上間隔をあけてください", "error");
+      return;
+    }
+    lastRefreshTimeRef.current = now;
+
     setRefreshingItemId(itemId);
     const res = await refreshPlaylistItem(itemId);
     if (res?.error) {
