@@ -52,3 +52,6 @@ next-env.d.ts
 # local tools & scripts
 /cloudflared/
 test_crypto.ts
+
+# docs & markdown
+*.md
