@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createFolder, deleteFolder, addPlaylistItem, deletePlaylistItem, checkUserStatus, renameFolder, reorderFolders, reorderItems, toggleFolderActive, movePlaylistItem, refreshPlaylistItem, migrateAccount } from "@/app/actions";
+import { encodeLocalUserId } from "@/lib/crypto";
 
 type PlaylistItem = {
   id: string;
@@ -188,6 +189,11 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
   const [isPending, startTransition] = useTransition();
   const [isOnline, setIsOnline] = useState(false);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  
+  const [origin, setOrigin] = useState("");
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   // Renaming state
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
@@ -657,7 +663,37 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
           </div>
         </div>
 
-        <div style={{ marginTop: 'auto', paddingTop: '24px', borderTop: '1px solid var(--border-light)' }}>
+        <div style={{ paddingBottom: '24px', borderBottom: '1px solid var(--border-light)' }}>
+          <h2 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px', padding: '0 4px' }}>ローカルランダム再生api</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '4px 8px', fontSize: '0.75rem', background: 'var(--bg-light)', border: '1px solid var(--border-light)', borderRadius: '4px' }}>
+                <span style={{ flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+                  {origin ? `${origin}/api/user/${encodeLocalUserId((user as any).platform === 'web' ? 'web' : 'vrchat', user.username)}/play` : ''}
+                </span>
+                <button 
+                  onClick={() => {
+                    if (!origin) return;
+                    const plat = (user as any).platform === 'web' ? 'web' : 'vrchat';
+                    navigator.clipboard.writeText(`${origin}/api/user/${encodeLocalUserId(plat, user.username)}/play`);
+                    showToast("API URLをコピーしました", "success");
+                  }}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="コピー"
+                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-main)'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 'auto', paddingTop: '24px', borderTop: '0px solid var(--border-light)' }}>
           <button
             onClick={() => setDangerZoneExpanded(!dangerZoneExpanded)}
             style={{ 
@@ -697,7 +733,7 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
       </aside>
 
       {/* Main Content */}
-      <main className="panel" style={{ flexGrow: 1, padding: '32px', display: 'flex', flexDirection: 'column' }}>
+      <main className="panel" style={{ flexGrow: 1, minWidth: 0, padding: '32px', display: 'flex', flexDirection: 'column', overflowY: 'auto', overflowX: 'hidden' }}>
         {!selectedFolder ? (
           <div style={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
             左のメニューからフォルダを選択してください

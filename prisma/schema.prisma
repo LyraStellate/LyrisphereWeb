@@ -9,8 +9,9 @@ datasource db {
 }
 
 model User {
-  id         String           @id // UUID or Base64Url ID
+  id         String           @id @default(uuid())
   username   String
+  platform   String           @default("vrchat")
   isOwner    Boolean          @default(false)
   lastBeatAt DateTime         @default(now())
   isActive   Boolean          @default(true) // for URL reissue, set old ones to false

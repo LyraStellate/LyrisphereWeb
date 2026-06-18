@@ -317,15 +317,16 @@ export async function migrateAccount(currentUserId: string, newIdParam: string) 
     return { error: "同じユーザー名への移行はできません。" };
   }
 
-  let destinationUser = await prisma.user.findFirst({ where: { username: decodedUsername } });
+  let destinationUser = await prisma.user.findFirst({ where: { username: decodedUsername, platform: "vrchat" } });
 
   // If destination user doesn't exist, create it
   if (!destinationUser) {
     destinationUser = await prisma.user.create({
       data: {
-        id: newIdParam, // Use the new encoded ID as the primary key
         username: decodedUsername,
+        platform: "vrchat",
         isActive: true,
+        lastBeatAt: new Date(0),
         folders: {
           create: {
             name: "すき！",

@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
   user = await prisma.user.findFirst({
     where: {
       username: username,
+      platform: "vrchat",
     },
   });
 
@@ -32,9 +33,10 @@ export async function GET(request: NextRequest) {
     // First time login
     user = await prisma.user.create({
       data: {
-        id: expectedId,
         username: username,
+        platform: "vrchat",
         isActive: true,
+        lastBeatAt: new Date(0),
         folders: {
           create: {
             name: "すき！",
