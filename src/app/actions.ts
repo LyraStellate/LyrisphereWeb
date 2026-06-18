@@ -3,6 +3,8 @@
 import prisma from "@/lib/prisma";
 import { revalidatePath, unstable_noStore as noStore } from "next/cache";
 import { randomUUID } from "crypto";
+import { cookies } from "next/headers";
+import { decodeUdonId } from "@/lib/crypto";
 
 function parseYTDuration(duration: string): number {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
@@ -300,4 +302,90 @@ export async function checkUserStatus(userId: string) {
   // Consider online if beat was received within the last 2 minutes (120,000 ms)
   const isOnline = Date.now() - user.lastBeatAt.getTime() < 120000;
   return isOnline;
+}
+
+export async function migrateAccount(currentUserId: string, newIdParam: string) {
+  const decodedUsername = decodeUdonId(newIdParam);
+  if (!decodedUsername) {
+    return { error: "無効なIDです。VRChatで表示されている正しいIDを入力してください。" };
+  }
+
+  const currentUser = await prisma.user.findUnique({ where: { id: currentUserId } });
+  if (!currentUser) return { error: "現在のユーザーが見つかりません。" };
+
+  if (decodedUsername === currentUser.username) {
+    return { error: "同じユーザー名への移行はできません。" };
+  }
+
+  let destinationUser = await prisma.user.findFirst({ where: { username: decodedUsername } });
+
+  // If destination user doesn't exist, create it
+  if (!destinationUser) {
+    destinationUser = await prisma.user.create({
+      data: {
+        id: newIdParam, // Use the new encoded ID as the primary key
+        username: decodedUsername,
+        isActive: true,
+        folders: {
+          create: {
+            name: "すき！",
+            isSystem: true,
+            order: 9999,
+          }
+        }
+      },
+    });
+  }
+
+  // Handle system folder merging
+  const currentSystemFolder = await prisma.playlistFolder.findFirst({
+    where: { userId: currentUserId, isSystem: true }
+  });
+  const destinationSystemFolder = await prisma.playlistFolder.findFirst({
+    where: { userId: destinationUser.id, isSystem: true }
+  });
+
+  if (currentSystemFolder && destinationSystemFolder) {
+    // Move all items from current system folder to destination system folder
+    await prisma.playlistItem.updateMany({
+      where: { folderId: currentSystemFolder.id },
+      data: { folderId: destinationSystemFolder.id }
+    });
+  }
+
+  // Handle regular folders: move them to the new user
+  await prisma.playlistFolder.updateMany({
+    where: { userId: currentUserId, isSystem: false },
+    data: { userId: destinationUser.id }
+  });
+
+  // EventState cleanup
+  const eventState = await prisma.eventState.findFirst();
+  if (eventState?.lastChosenUserId === currentUserId) {
+    await prisma.eventState.update({
+      where: { id: 1 },
+      data: { lastChosenUserId: destinationUser.id }
+    });
+  }
+
+  // Delete old user
+  // Delete system folder first to satisfy constraints if any (SQLite doesn't strictly need it but good practice)
+  if (currentSystemFolder) {
+    await prisma.playlistItem.deleteMany({ where: { folderId: currentSystemFolder.id } }); // Should be empty now
+    await prisma.playlistFolder.delete({ where: { id: currentSystemFolder.id } });
+  }
+
+  await prisma.user.delete({ where: { id: currentUserId } });
+
+  // Update session cookie
+  const cookieStore = await cookies();
+  cookieStore.set("sessionId", destinationUser.id, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 30, // 30 days
+    path: "/",
+  });
+
+  return { success: true };
 }

@@ -4,29 +4,38 @@
 
 ## 概要
 
-Udonの制約（強力な暗号化ライブラリが標準で利用不可）を考慮し、**「XOR難読化 ＋ Base64Urlエンコード」** を用いてIDを生成します。
+Udonの制約（強力な暗号化ライブラリが標準で利用不可）を考慮し、**「ランダムソルト付きのLCGストリーム暗号 ＋ Base64Urlエンコード」** を用いてIDを生成します。
+これにより、同じユーザー名であっても生成するたびに異なる文字列が出力され、対応表推測による攻撃を防ぎます。
+また、外部アクセスとUdonからのアクセスを区別するため、平文には `udon|` タグを付与します。
 
 ## アルゴリズム
 
 Udon側で取得した `VRCPlayerApi.displayName` を元に、以下の手順でID文字列を生成してください。
 
-### 1. XOR難読化
-ユーザー名の文字列（UTF-8バイト配列）と、事前に取り決めた共有鍵（Secret Key）の文字列（UTF-8バイト配列）の各バイトについて、XOR（排他的論理和）演算を行います。
+### 1. 平文の構築
+取得したユーザー名の先頭に `udon|` を付与し、UTF-8バイト配列に変換します。
+（例: ユーザー名が `PlayerA` の場合、平文は `udon|PlayerA` となります）
 
-*   **共有鍵 (Secret Key):** `LyrisphereSecret2026` （※仮設定。実装時に任意のものに変更可能ですが、サーバー側と一致させる必要があります）
-*   **処理:** ユーザー名の長さが共有鍵より長い場合は、共有鍵をループして適用します。
+### 2. 暗号化（ランダムソルト付きLCGストリーム暗号）
+1. **ソルト生成**: 0～65535 の範囲で2バイトのランダムな整数（ソルト）を生成します。
+2. **シード初期化**: 生成したソルトを初期シード（32ビット符号なし整数）として設定します。
+3. **ストリーム生成とXOR**:
+   平文の各バイトに対して、以下の演算を行います：
+   - シードをLCGアルゴリズムで更新: `seed = (seed * 214013 + 2531011)`
+   - 擬似乱数バイトを取得: `randomByte = (seed >> 16) & 0xFF`
+   - 暗号化バイトを計算: `CipherByte = PlaintextByte ^ SecretKeyByte ^ randomByte`
+     ※ `SecretKeyByte` は、共有鍵（`LyrisphereSecret2026`）のUTF-8バイト配列をループして使用します。
 
-### 2. Base64Urlエンコード
-XOR演算結果のバイト配列を Base64 文字列に変換し、さらに URL セーフな形式（Base64Url形式）に置換します。
+### 3. 出力データの構築とエンコード
+1. **データ結合**: 先頭の2バイトに「生成したソルト」を格納し、3バイト目以降に「暗号化バイト配列」を格納した配列を作成します。
+2. **Base64Url化**: 結合した配列を Base64 文字列に変換し、URLセーフな形式に置換します。
+   - `+` を `-` に置換
+   - `/` を `_` に置換
+   - 末尾の `=` （パディング）を削除
 
-*   `+` を `-` に置換
-*   `/` を `_` に置換
-*   末尾の `=` （パディング）を削除
-
-### 3. URLの構築
+### 4. URLの構築
 生成された文字列を `id` パラメータとして付与したURLを作成します。
-
-*   **最終出力例:** `https://lyrisphere.lyrastellate.dev/api/login?id={生成されたID文字列}`
+* **最終出力例:** `https://lyrisphere.lyrastellate.dev/api/login?id={生成されたID文字列}`
 
 ---
 
@@ -35,28 +44,35 @@ XOR演算結果のバイト配列を Base64 文字列に変換し、さらに UR
 ```csharp
 string username = VRCPlayerApi.GetPlayerById(playerId).displayName;
 string secretKey = "LyrisphereSecret2026";
+string plaintext = "udon|" + username;
 
-byte[] userBytes = System.Text.Encoding.UTF8.GetBytes(username);
+byte[] plainBytes = System.Text.Encoding.UTF8.GetBytes(plaintext);
 byte[] keyBytes = System.Text.Encoding.UTF8.GetBytes(secretKey);
-byte[] xorBytes = new byte[userBytes.Length];
 
-// 1. XOR処理
-for (int i = 0; i < userBytes.Length; i++)
-{
-    xorBytes[i] = (byte)(userBytes[i] ^ keyBytes[i % keyBytes.Length]);
+// 1. ソルトの生成 (0〜65535)
+int salt = UnityEngine.Random.Range(0, 65536);
+
+// 2. 出力配列の準備 (ソルト2バイト + 暗号文長)
+byte[] outBytes = new byte[plainBytes.Length + 2];
+outBytes[0] = (byte)(salt >> 8);
+outBytes[1] = (byte)(salt & 0xFF);
+
+// 3. LCGストリーム暗号による暗号化
+uint seed = (uint)salt;
+
+for (int i = 0; i < plainBytes.Length; i++) {
+    // LCG更新
+    seed = (seed * 214013 + 2531011);
+    byte randomByte = (byte)((seed >> 16) & 0xFF);
+    
+    // XOR演算 (平文 ^ 鍵 ^ 乱数)
+    outBytes[i + 2] = (byte)(plainBytes[i] ^ keyBytes[i % keyBytes.Length] ^ randomByte);
 }
 
-// 2. Base64Url化
-string base64Str = System.Convert.ToBase64String(xorBytes);
-string idString = base64Str.Replace('+', '-').Replace('/', '_').TrimEnd('=');
+// 4. Base64Urlエンコード
+string base64 = System.Convert.ToBase64String(outBytes);
+string id = base64.Replace("+", "-").Replace("/", "_").TrimEnd('=');
 
-// 3. URL作成
-string finalUrl = "https://lyrisphere.lyrastellate.dev/api/login?id=" + idString;
+// 最終URL生成
+// url = "https://lyrisphere.lyrastellate.dev/api/login?id=" + id;
 ```
-
----
-
-## サーバー側の挙動（URL再発行について）
-*   基本的には、上記ロジックで生成されたURLをWebブラウザで開くことで、サーバー側で逆算（Base64デコード＆XOR）し、ユーザーを特定します。
-*   ユーザーがWebページ上で「URLの再発行（無効化）」を行った場合、サーバーはランダムなUUIDを新規発行します。
-*   再発行が行われたユーザーについては、**Udon側で生成した上記のIDは使用できなくなります**。再発行後は、Web画面に表示された新しいUUIDをVRChat内で直接コピペ入力する必要があります。（この旨はWeb上でユーザーに案内されます）

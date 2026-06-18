@@ -1,21 +1,7 @@
 export const SECRET_KEY = process.env.SECRET_KEY || "LyrisphereSecret2026";
 
-function xorBytes(data: Uint8Array, key: Uint8Array): Uint8Array {
-  const result = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i++) {
-    result[i] = data[i] ^ key[i % key.length];
-  }
-  return result;
-}
-
 export function decodeUdonId(encodedId: string): string | null {
   try {
-    // Check if it's a UUID (reissued ID)
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(encodedId)) {
-      // UUIDs are not decoded, they are used as is, but we distinguish them later in DB
-      return encodedId; // This might be handled differently
-    }
-
     // Replace Base64Url specific chars back to standard Base64
     let base64 = encodedId.replace(/-/g, '+').replace(/_/g, '/');
     // Add padding if necessary
@@ -29,17 +15,32 @@ export function decodeUdonId(encodedId: string): string | null {
       bytes[i] = binaryString.charCodeAt(i);
     }
 
-    const keyBytes = new TextEncoder().encode(SECRET_KEY);
-    const decryptedBytes = xorBytes(bytes, keyBytes);
+    if (bytes.length < 2) return null;
 
-    const username = new TextDecoder().decode(decryptedBytes);
-    return username;
+    // Extract the 2-byte salt
+    const salt = (bytes[0] << 8) | bytes[1];
+    let seed = salt >>> 0;
+
+    const keyBytes = new TextEncoder().encode(SECRET_KEY);
+    const decryptedBytes = new Uint8Array(bytes.length - 2);
+
+    for (let i = 0; i < decryptedBytes.length; i++) {
+      // LCG step: seed = (seed * 214013 + 2531011) % 2^32
+      seed = (Math.imul(seed, 214013) + 2531011) >>> 0;
+      const randomByte = (seed >>> 16) & 0xFF;
+      decryptedBytes[i] = bytes[i + 2] ^ keyBytes[i % keyBytes.length] ^ randomByte;
+    }
+
+    const plaintext = new TextDecoder().decode(decryptedBytes);
+    
+    // Verify tag
+    if (plaintext.startsWith("udon|")) {
+      return plaintext.substring(5);
+    }
+    
+    return null;
   } catch (error) {
     console.error("Failed to decode ID:", error);
     return null;
   }
-}
-
-export function isUuid(str: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 }

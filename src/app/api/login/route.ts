@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { decodeUdonId, isUuid } from "@/lib/crypto";
+import { decodeUdonId } from "@/lib/crypto";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;

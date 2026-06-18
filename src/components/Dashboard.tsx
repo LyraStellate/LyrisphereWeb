@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { createFolder, deleteFolder, addPlaylistItem, deletePlaylistItem, checkUserStatus, renameFolder, reorderFolders, reorderItems, toggleFolderActive, movePlaylistItem, refreshPlaylistItem } from "@/app/actions";
+import { createFolder, deleteFolder, addPlaylistItem, deletePlaylistItem, checkUserStatus, renameFolder, reorderFolders, reorderItems, toggleFolderActive, movePlaylistItem, refreshPlaylistItem, migrateAccount } from "@/app/actions";
 
 type PlaylistItem = {
   id: string;
@@ -205,6 +205,10 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
   const [confirmModal, setConfirmModal] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
   const [moveModal, setMoveModal] = useState<{itemId: string, itemName: string, currentFolderId: string} | null>(null);
   const [selectedMoveFolderId, setSelectedMoveFolderId] = useState<string>("");
+  const [migrationModalOpen, setMigrationModalOpen] = useState(false);
+  const [migrationTargetId, setMigrationTargetId] = useState("");
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [dangerZoneExpanded, setDangerZoneExpanded] = useState(false);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
     setToastMessage({ message, type });
@@ -652,6 +656,44 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
             )}
           </div>
         </div>
+
+        <div style={{ marginTop: 'auto', paddingTop: '24px', borderTop: '1px solid var(--border-light)' }}>
+          <button
+            onClick={() => setDangerZoneExpanded(!dangerZoneExpanded)}
+            style={{ 
+              background: 'transparent', 
+              border: 'none', 
+              cursor: 'pointer', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              padding: '4px',
+              color: 'var(--text-muted)',
+              width: '100%'
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: dangerZoneExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <h2 style={{ fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Danger Zone</h2>
+          </button>
+          
+          <div style={{ 
+            overflow: 'hidden', 
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', 
+            maxHeight: dangerZoneExpanded ? '100px' : '0px',
+            opacity: dangerZoneExpanded ? 1 : 0,
+            marginTop: dangerZoneExpanded ? '12px' : '0px'
+          }}>
+            <button 
+              className="btn btn-danger-ghost" 
+              style={{ width: '100%', justifyContent: 'flex-start', padding: '8px' }}
+              onClick={() => setMigrationModalOpen(true)}
+            >
+              データ移行（ID変更時）
+            </button>
+          </div>
+        </div>
       </aside>
 
       {/* Main Content */}
@@ -1019,6 +1061,55 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button className="btn btn-secondary" onClick={() => { setMoveModal(null); setSelectedMoveFolderId(""); }}>キャンセル</button>
               <button className="btn btn-primary" onClick={handleMoveItem} disabled={!selectedMoveFolderId}>移動する</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Migration Modal */}
+      {migrationModalOpen && (
+        <div className="modal-overlay" onClick={() => !isMigrating && setMigrationModalOpen(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', color: '#ef4444' }}>データ移行（Danger Zone）</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+              VRChatのアカウント名変更などにより新しいIDを取得した場合、この機能を使ってデータを移行できます。
+            </p>
+            <div style={{ background: '#fef2f2', padding: '12px', borderRadius: '6px', marginBottom: '16px', border: '1px solid #fca5a5' }}>
+              <p style={{ color: '#991b1b', margin: 0, fontSize: '0.875rem', fontWeight: 500 }}>
+                ⚠️ 移行を実行すると現在のユーザーデータは新しいIDに移動し、現在のアカウントは完全に削除されます。この操作は元に戻せません。
+              </p>
+            </div>
+            <input
+              type="text"
+              className="input-text"
+              placeholder="移行先の新しいログインID"
+              value={migrationTargetId}
+              onChange={(e) => setMigrationTargetId(e.target.value)}
+              style={{ marginBottom: '24px', width: '100%' }}
+              disabled={isMigrating}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button className="btn btn-secondary" onClick={() => setMigrationModalOpen(false)} disabled={isMigrating}>キャンセル</button>
+              <button 
+                className="btn btn-primary" 
+                style={{ background: '#ef4444', borderColor: '#ef4444', color: 'white' }}
+                disabled={!migrationTargetId.trim() || isMigrating}
+                onClick={async () => {
+                  setIsMigrating(true);
+                  const res = await migrateAccount(user.id, migrationTargetId.trim());
+                  if (res?.error) {
+                    showToast(res.error, "error");
+                    setIsMigrating(false);
+                  } else {
+                    showToast("移行が完了しました。ページを再読み込みします...", "success");
+                    setTimeout(() => {
+                      window.location.href = "/";
+                    }, 1500);
+                  }
+                }}
+              >
+                {isMigrating ? "移行中..." : "移行を実行する"}
+              </button>
             </div>
           </div>
         </div>
