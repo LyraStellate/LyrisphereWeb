@@ -164,6 +164,7 @@ export default function Dashboard({ initialUser }: { initialUser: User }) {
   const router = useRouter();
   const [user, setUser] = useState(initialUser);
   const [showSplash, setShowSplash] = useState(true);
+  // ユーザーが1曲も登録していない場合を新規ユーザー（初回）と判定する
   const isNewUser = useMemo(() => initialUser.folders.every(f => f.items.length === 0), [initialUser]);
   const getTopFolderId = (folders: PlaylistFolder[]) => {
     const nonSystem = folders.filter(f => !f.isSystem);

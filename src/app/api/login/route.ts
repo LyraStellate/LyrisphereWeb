@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { decodeUdonId } from "@/lib/crypto";
+import { randomUUID } from "crypto";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -33,18 +34,29 @@ export async function GET(request: NextRequest) {
     // First time login
     user = await prisma.user.create({
       data: {
+        id: randomUUID(),
         username: username,
         platform: "vrchat",
         isActive: true,
         lastBeatAt: new Date(0),
-        folders: {
-          create: {
-            name: "すき！",
-            isSystem: true,
-            order: 9999, // Ensure it's at the end
-          }
-        }
       },
+    });
+
+    await prisma.playlistFolder.createMany({
+      data: [
+        {
+          userId: user.id,
+          name: "デフォルトフォルダ",
+          isSystem: false,
+          order: 0,
+        },
+        {
+          userId: user.id,
+          name: "すき！",
+          isSystem: true,
+          order: 9999,
+        }
+      ]
     });
   } else {
     // Check if existing user has the system folder, if not, create it

@@ -323,18 +323,29 @@ export async function migrateAccount(currentUserId: string, newIdParam: string) 
   if (!destinationUser) {
     destinationUser = await prisma.user.create({
       data: {
+        id: randomUUID(),
         username: decodedUsername,
         platform: "vrchat",
         isActive: true,
         lastBeatAt: new Date(0),
-        folders: {
-          create: {
-            name: "すき！",
-            isSystem: true,
-            order: 9999,
-          }
-        }
       },
+    });
+
+    await prisma.playlistFolder.createMany({
+      data: [
+        {
+          userId: destinationUser.id,
+          name: "デフォルトフォルダ",
+          isSystem: false,
+          order: 0,
+        },
+        {
+          userId: destinationUser.id,
+          name: "すき！",
+          isSystem: true,
+          order: 9999,
+        }
+      ]
     });
   }
 

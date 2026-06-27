@@ -38,12 +38,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ status: "owner_absent", message: "Owner is not active, skipping selection" }, { status: 200 });
   }
 
+  // 過去1時間以内に再生された楽曲の URL のリストを取得する
+  const recentlyPlayedItems = await prisma.playlistItem.findMany({
+    where: {
+      lastPlayedAt: {
+        gte: cooldownCutoff,
+      }
+    },
+    select: {
+      url: true,
+    }
+  });
+  const recentlyPlayedUrls = new Set(recentlyPlayedItems.map(i => i.url));
+
   // Helper to get eligible items for a user
   const getEligibleItems = (user: any, useCooldown: boolean) => {
     let items: any[] = [];
     user.folders.forEach((folder: any) => {
       folder.items.forEach((item: any) => {
-        if (!useCooldown || !item.lastPlayedAt || new Date(item.lastPlayedAt) < cooldownCutoff) {
+        if (!useCooldown || ((!item.lastPlayedAt || new Date(item.lastPlayedAt) < cooldownCutoff) && !recentlyPlayedUrls.has(item.url))) {
           items.push(item);
         }
       });
